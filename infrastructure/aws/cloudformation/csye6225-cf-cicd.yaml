@@ -1,0 +1,195 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CloudFormation Template to create IAM Roles, Policies for EC2, CodeDeploy and S3
+
+Parameters:
+  profileName:
+    Description: Profile Name
+    Type: "String"
+  DeploymentGroupName:
+    Description: Deployment Group Name
+    Type: "String"
+  EC2Key:
+    Description: EC2Key
+    Type: "String"
+  EC2Value:
+    Description: EC2Value
+    Type: "String"
+  CodeDeployBucket:
+    Description: EC2Value
+    Type: "String"
+  TravisUser:
+    Description: EC2Value
+    Type: "String"
+  StorageBucket:
+    Description: EC2Value
+    Type: "String"
+
+
+Resources:
+  CodeDepolyEc2S3Policies:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: CodeDeploy-EC2-S3
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - 's3:Get*'
+              - 's3:List*'
+            Effect: Allow
+            Resource: '*'
+      Roles:
+        -
+          Ref: "CodeDeployEC2ServiceRole"
+
+  RolePolicyUploadToS3:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: new CF policy
+      ManagedPolicyName: Travis-Upload-To-S3
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:PutObject'
+            Resource:
+              - !Sub '${CodeDeployBucket}/*'
+      Users:
+        - !Ref TravisUser
+
+  travisCiDownload:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Trying to create a CF policyy
+      ManagedPolicyName: Travis-code-deploy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'codedeploy:RegisterApplicationRevision'
+              - 'codedeploy:GetApplicationRevision'
+            Resource:
+              - !Sub 'arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:application:csye6225-fall2018'
+          - Effect: Allow
+            Action:
+              - 'codedeploy:CreateDeployment'
+              - 'codedeploy:GetDeployment'
+            Resource:
+              - '*'
+          - Effect: Allow
+            Action:
+              - 'codedeploy:GetDeploymentConfig'
+            Resource:
+             - !Sub 'arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentconfig:CodeDeployDefault.OneAtATime'
+             - !Sub 'arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentconfig:CodeDeployDefault.AllAtOnce'
+      Users:
+        - !Ref TravisUser
+
+  AccessAttachmentToS3Bucket: 
+    Type: "AWS::IAM::ManagedPolicy"
+    Properties: 
+      ManagedPolicyName: Access-Attachment-To-S3-Bucket
+      PolicyDocument: 
+        Statement: 
+          - 
+            Action: 
+              - "s3:PutObject"
+              - "s3:DeleteObject"
+              - "s3:GetObject"
+            Effect: Allow
+            Resource: !Sub '${StorageBucket}/*'
+        Version: 2012-10-17
+      Roles: 
+        - 
+          Ref: CodeDeployEC2ServiceRole
+
+
+        
+  CodeDeployEC2ServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - "arn:aws:iam::aws:policy/AmazonSESFullAccess"
+        - "arn:aws:iam::aws:policy/AWSLambdaFullAccess"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      RoleName: CodeDeployEC2ServiceRole
+
+  CodeDeployServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - "arn:aws:iam::aws:policy/AmazonSESFullAccess"
+        - "arn:aws:iam::aws:policy/AWSLambdaFullAccess"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "codedeploy.amazonaws.com"
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      RoleName: CodeDeployServiceRole
+
+  Ec2InstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      InstanceProfileName: !Ref profileName 
+      Path: "/"
+      Roles:
+        -
+          Ref: CodeDeployEC2ServiceRole
+
+  WebappApplication:
+    Type: "AWS::CodeDeploy::Application"
+    Properties:
+      ApplicationName: !Ref DeploymentGroupName
+  WebappDeploymentGroup:
+    Type: "AWS::CodeDeploy::DeploymentGroup"
+    Properties:
+      ApplicationName: !Ref WebappApplication
+      DeploymentGroupName: !Ref DeploymentGroupName
+      DeploymentStyle:
+        DeploymentType: IN_PLACE
+        DeploymentOption: WITHOUT_TRAFFIC_CONTROL
+      DeploymentConfigName: CodeDeployDefault.AllAtOnce
+      Ec2TagFilters: 
+      - 
+        Key: !Ref EC2Key
+        Value: !Ref EC2Value
+        Type: "KEY_AND_VALUE"
+      ServiceRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/CodeDeployServiceRole'
+
+    DependsOn: CodeDeployServiceRole
+
+  myLogGroup: 
+   Type: AWS::Logs::LogGroup
+   Properties: 
+    LogGroupName : csye6225_fall2018
+    RetentionInDays: 7
+
+  LogStream: 
+    Type: AWS::Logs::LogStream
+    DependsOn: myLogGroup
+    Properties: 
+      LogGroupName: "csye6225_fall2018"
+      LogStreamName: "webapp"

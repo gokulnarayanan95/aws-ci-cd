@@ -1,0 +1,27 @@
+version: 0.0
+os: linux
+files:
+  - source: /
+    destination: /home/centos/ec2-user
+
+hooks:
+  BeforeInstall:
+    - location: beforeInstall.sh
+      timeout: 300
+      runas: root
+  AfterInstall:
+    - location: afterInstall.sh
+      timeout: 600
+      runas: root
+  ApplicationStart:
+    - location: applicationStart.sh
+      timeout: 60
+      runas: root
+  ApplicationStop:
+    - location: applicationStop.sh
+      timeout: 120
+      runas: root
+  ValidateService:
+    - location: validateService.sh
+      timeout: 60
+      runas: root

@@ -1,0 +1,265 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: A sample template
+
+
+Parameters:
+  volumesize:
+    Description: Volume size EC2
+    Type: "String"
+  volumeType:
+    Description: Volume Type EC2
+    Type: "String"
+  instanceType:
+    Description: Instance Type EC2
+    Type: "String"
+  imageId:
+    Description: Image Id EC2
+    Type: "String"
+  subnetId:
+    Description: Subnet Id EC2
+    Type: "String"
+  keyName:
+    Description: KeyName pair EC2
+    Type: "String"
+  webSecGrpName:
+    Description: Webserver security group name
+    Type: "String"
+  webSecGrpDesc:
+    Description: Webserver security group description
+    Type: "String"
+  vpcId:
+    Description: Webserver security VpcId
+    Type: "String"
+  rdsSecGrpName:
+    Description: Webserver security VpcId
+    Type: "String"
+  rdsSecGrpDesc:
+    Description: Webserver security VpcId
+    Type: "String"
+  dbHostName:
+    Description: RDS Host 
+    Type: "String" 
+  dbUserName:
+    Description: RDS Username
+    Type: "String" 
+  dbPassword:
+    Description: RDS Password
+    Type: "String"  
+  dbDatabaseName:
+    Description: RDS Password
+    Type: "String" 
+  awsBucketName:
+    Description: RDS Password
+    Type: "String"
+  profileName:
+    Description: profile Name
+    Type: "String"
+  ExportStackName:
+    Description: The name of the stack that exports the values
+    Type: String
+
+Resources:  
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      BlockDeviceMappings:
+        -
+          DeviceName: /dev/sdm  
+          Ebs:
+            VolumeSize: !Ref volumesize
+            VolumeType: !Ref volumeType
+      InstanceType: !Ref instanceType
+      ImageId: !Ref imageId
+      SubnetId: 
+          Fn::ImportValue: !Sub '${ExportStackName}-PublicSubnet1'
+      IamInstanceProfile: !Ref profileName
+      SecurityGroupIds: 
+        - !Ref WebServerSecurityGroup
+      KeyName: !Ref keyName
+      Tags:
+        -
+          Key: EC2Key
+          Value: EC2Value
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - "\n"
+          - - "#!/bin/bash"
+            - yum update -y
+            - yum install ruby -y
+            - yum update
+            - yum install wget -y
+            - yum update
+            - cd /home/centos
+            - wget https://aws-codedeploy-us-east-1.s3.amazonaws.com/latest/install
+            - chmod +x ./install
+            - ./install auto
+            - service codedeploy-agent start -y
+            - systemctl daemon-reload
+            - yum install -y gcc-c++ make -y
+            - curl -sL https://rpm.nodesource.com/setup_8.x | bash -
+            - yum install nodejs -y
+            - yum install wget -y
+            - wget http://repo.mysql.com/mysql-community-release-el7-5.noarch.rpm
+            - yum install epel-release -y
+            - rpm -ivh mysql-community-release-el7-5.noarch.rpm
+            - yum update -y
+            - yum install mysql-server -y
+            - Fn::Join:
+              - ''
+              - - echo host=
+                - Fn::GetAtt:
+                  - RDSInstance
+                  - Endpoint.Address
+                - ",bucket="
+                - Ref: awsBucketName
+                - "> out.txt;"
+            - Fn::Join: 
+              - ""
+              - - "mysql -h "
+                - Fn::GetAtt:
+                  - RDSInstance
+                  - Endpoint.Address
+                - " -u "
+                - Ref: dbUserName
+                - " -p" 
+                - Ref: dbPassword
+                - " -e "
+                - "\"use authentication; create table if not exists auth(username varchar(255), password varchar(255)); create table if not exists attachmentlog (id varchar(255), transactionID varchar(255), path varchar(255)); create table if not exists transaction(username varchar(255), id varchar(255), description varchar(255), merchant varchar(255), amount varchar(255),date varchar(255),category varchar(255));\"" 
+            - cd ~
+            - wget https://s3.amazonaws.com/amazoncloudwatch-agent/centos/amd64/latest/amazon-cloudwatch-agent.rpm
+            - wget https://s3.amazonaws.com/amazoncloudwatch-agent/assets/amazon-cloudwatch-agent.gpg
+            - wget https://s3.amazonaws.com/amazoncloudwatch-agent/centos/amd64/latest/amazon-cloudwatch-agent.rpm.sig
+            - gpg --import amazon-cloudwatch-agent.gpg
+            - gpg --fingerprint 3B789C72
+            - wget https://s3.amazonaws.com/amazoncloudwatch-agent/centos/amd64/latest/amazon-cloudwatch-agent.rpm.sig
+            - gpg --verify amazon-cloudwatch-agent.rpm.sig amazon-cloudwatch-agent.rpm   
+            - sudo rpm -U ./amazon-cloudwatch-agent.rpm     
+
+            
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref awsBucketName
+      AccessControl: Private
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        -
+          AttributeName: Id
+          AttributeType: S
+      KeySchema:
+        -
+          AttributeName: Id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      TableName: csye-6225
+
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Ref webSecGrpName
+      GroupDescription: !Ref webSecGrpDesc
+      VpcId:
+        Fn::ImportValue: !Sub '${ExportStackName}-vpcId'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: '443'
+          ToPort: '443'
+          CidrIp: 0.0.0.0/0
+
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Ref rdsSecGrpName
+      VpcId:
+        Fn::ImportValue: !Sub '${ExportStackName}-vpcId'
+      GroupDescription: !Ref rdsSecGrpDesc
+
+  RDSIngressSecurity:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref WebServerSecurityGroup
+      GroupId: !Ref RDSSecurityGroup
+
+
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet for RDS instances
+      SubnetIds:
+        - Fn::ImportValue: !Sub '${ExportStackName}-PublicSubnet1'
+        - Fn::ImportValue: !Sub '${ExportStackName}-PublicSubnet2'
+        
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: !Ref dbDatabaseName
+      AllocatedStorage: 100
+      DBInstanceClass: db.t2.medium
+      Engine: MySQL
+      PubliclyAccessible: false
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      DBInstanceIdentifier: csye6225-fall2018
+      MasterUsername: !Ref dbUserName
+      MasterUserPassword: !Ref dbPassword
+      MultiAZ: false 
+      VPCSecurityGroups:
+        - !Ref RDSSecurityGroup
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+      - Type: redirect 
+        RedirectConfig:
+          Protocol: HTTPS
+          StatusCode: HTTP_301
+          Port: 443
+
+
+Outputs:
+  InstanceId:
+    Description: InstanceId of the newly created EC2 instance
+    Value:
+      Ref: EC2Instance
+  AZ:
+    Description: Availability Zone of the newly created EC2 instance
+    Value:
+      Fn::GetAtt:
+      - RDSInstance
+      - Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-rdsEndpoint
+
+  PublicDNS:
+    Description: Public DNSName of the newly created EC2 instance
+    Value:
+      Fn::GetAtt:
+      - EC2Instance
+      - PublicDnsName
+  PublicIP:
+    Description: Public IP address of the newly created EC2 instance
+    Value:
+      Fn::GetAtt:
+      - EC2Instance
+      - PublicIp
